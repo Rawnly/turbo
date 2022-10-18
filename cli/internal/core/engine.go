@@ -17,6 +17,8 @@ type Task struct {
 	Deps util.Set
 	// TopoDeps are dependencies across packages within the same topological graph (e.g. parent `build` -> child `build`) */
 	TopoDeps util.Set
+	// Persistent is whether this task is persistent or not. We need this information to validate TopoDeps graph
+	Persistent bool
 }
 
 type Visitor = func(taskID string) error
@@ -66,6 +68,7 @@ func (e *Engine) Prepare(options *EngineExecutionOptions) error {
 	}
 
 	if err := e.generateTaskGraph(pkgs, tasks, options.TasksOnly); err != nil {
+
 		return err
 	}
 
@@ -97,7 +100,7 @@ func (e *Engine) Execute(visitor Visitor, opts ExecOpts) []error {
 	})
 }
 
-func (e *Engine) getTaskDefinition(pkg string, taskName string, taskID string) (*Task, error) {
+func (e *Engine) GetTaskDefinition(pkg string, taskName string, taskID string) (*Task, error) {
 	if task, ok := e.Tasks[taskID]; ok {
 		return task, nil
 	}
@@ -116,17 +119,19 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 	packageTasksDepsMap := getPackageTaskDepsMap(e.PackageTaskDeps)
 
 	traversalQueue := []string{}
+
 	for _, pkg := range pkgs {
 		isRootPkg := pkg == util.RootPkgName
 		for _, taskName := range taskNames {
 			if !isRootPkg || e.rootEnabledTasks.Includes(taskName) {
 				taskID := util.GetTaskId(pkg, taskName)
-				if _, err := e.getTaskDefinition(pkg, taskName, taskID); err != nil {
+				if _, err := e.GetTaskDefinition(pkg, taskName, taskID); err != nil {
 					// Initial, non-package tasks are not required to exist, as long as some
 					// package in the list packages defines it as a package-task. Dependencies
 					// *are* required to have a definition.
 					continue
 				}
+
 				traversalQueue = append(traversalQueue, taskID)
 			}
 		}
@@ -134,7 +139,9 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 
 	visited := make(util.Set)
 
+	// Things get appended to traversalQueue inside this loop, so we use the len() check instead of range.
 	for len(traversalQueue) > 0 {
+		// pop off the first item from the traversalQueue
 		taskID := traversalQueue[0]
 		traversalQueue = traversalQueue[1:]
 
@@ -142,12 +149,16 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 		if pkg == util.RootPkgName && !e.rootEnabledTasks.Includes(taskName) {
 			return fmt.Errorf("%v needs an entry in turbo.json before it can be depended on because it is a task run from the root package", taskID)
 		}
-		task, err := e.getTaskDefinition(pkg, taskName, taskID)
+
+		task, err := e.GetTaskDefinition(pkg, taskName, taskID)
+
 		if err != nil {
 			return err
 		}
+
 		if !visited.Includes(taskID) {
 			visited.Add(taskID)
+
 			deps := task.Deps
 
 			if tasksOnly {
@@ -165,11 +176,11 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 				})
 			}
 
-			toTaskID := taskID
 			hasTopoDeps := task.TopoDeps.Len() > 0 && e.TopologicGraph.DownEdges(pkg).Len() > 0
 			hasDeps := deps.Len() > 0
+
 			hasPackageTaskDeps := false
-			if _, ok := packageTasksDepsMap[toTaskID]; ok {
+			if _, ok := packageTasksDepsMap[taskID]; ok {
 				hasPackageTaskDeps = true
 			}
 
@@ -180,8 +191,8 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 					for depPkg := range depPkgs {
 						fromTaskID := util.GetTaskId(depPkg, from)
 						e.TaskGraph.Add(fromTaskID)
-						e.TaskGraph.Add(toTaskID)
-						e.TaskGraph.Connect(dag.BasicEdge(toTaskID, fromTaskID))
+						e.TaskGraph.Add(taskID)
+						e.TaskGraph.Connect(dag.BasicEdge(taskID, fromTaskID))
 						traversalQueue = append(traversalQueue, fromTaskID)
 					}
 				}
@@ -191,18 +202,18 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 				for _, from := range deps.UnsafeListOfStrings() {
 					fromTaskID := util.GetTaskId(pkg, from)
 					e.TaskGraph.Add(fromTaskID)
-					e.TaskGraph.Add(toTaskID)
-					e.TaskGraph.Connect(dag.BasicEdge(toTaskID, fromTaskID))
+					e.TaskGraph.Add(taskID)
+					e.TaskGraph.Connect(dag.BasicEdge(taskID, fromTaskID))
 					traversalQueue = append(traversalQueue, fromTaskID)
 				}
 			}
 
 			if hasPackageTaskDeps {
-				if pkgTaskDeps, ok := packageTasksDepsMap[toTaskID]; ok {
+				if pkgTaskDeps, ok := packageTasksDepsMap[taskID]; ok {
 					for _, fromTaskID := range pkgTaskDeps {
 						e.TaskGraph.Add(fromTaskID)
-						e.TaskGraph.Add(toTaskID)
-						e.TaskGraph.Connect(dag.BasicEdge(toTaskID, fromTaskID))
+						e.TaskGraph.Add(taskID)
+						e.TaskGraph.Connect(dag.BasicEdge(taskID, fromTaskID))
 						traversalQueue = append(traversalQueue, fromTaskID)
 					}
 				}
@@ -210,11 +221,12 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 
 			if !hasDeps && !hasTopoDeps && !hasPackageTaskDeps {
 				e.TaskGraph.Add(ROOT_NODE_NAME)
-				e.TaskGraph.Add(toTaskID)
-				e.TaskGraph.Connect(dag.BasicEdge(toTaskID, ROOT_NODE_NAME))
+				e.TaskGraph.Add(taskID)
+				e.TaskGraph.Connect(dag.BasicEdge(taskID, ROOT_NODE_NAME))
 			}
 		}
 	}
+
 	return nil
 }
 

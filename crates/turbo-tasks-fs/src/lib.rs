@@ -37,6 +37,7 @@ use mime::Mime;
 use notify::{watcher, DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use read_glob::read_glob;
 pub use read_glob::{ReadGlobResult, ReadGlobResultVc};
+use rope::RopeReadRef;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::{fs, io::AsyncReadExt};
@@ -1209,10 +1210,10 @@ impl File {
     }
 
     /// Creates a [File] from a rope.
-    fn from_rope(content: &Rope) -> Self {
+    fn from_rope(content: Rope) -> Self {
         File {
             meta: FileMeta::default(),
-            content: content.clone(),
+            content,
         }
     }
 
@@ -1260,8 +1261,20 @@ impl From<&[u8]> for File {
     }
 }
 
+impl From<RopeReadRef> for File {
+    fn from(rope: RopeReadRef) -> Self {
+        File::from_rope(rope.clone_value())
+    }
+}
+
 impl From<&Rope> for File {
     fn from(rope: &Rope) -> Self {
+        File::from_rope(rope.clone())
+    }
+}
+
+impl From<Rope> for File {
+    fn from(rope: Rope) -> Self {
         File::from_rope(rope)
     }
 }
@@ -1373,7 +1386,7 @@ impl FileContent {
     pub fn parse_json_with_comments(&self) -> FileJsonContent {
         match self {
             FileContent::Content(file) => match file.content.to_string() {
-                Some(string) => match parse_to_serde_value(
+                Ok(string) => match parse_to_serde_value(
                     &string,
                     &ParseOptions {
                         allow_comments: true,
@@ -1387,7 +1400,7 @@ impl FileContent {
                     },
                     Err(_) => FileJsonContent::Unparseable,
                 },
-                None => FileJsonContent::Unparseable,
+                Err(_) => FileJsonContent::Unparseable,
             },
             FileContent::NotFound => FileJsonContent::NotFound,
         }
@@ -1396,7 +1409,7 @@ impl FileContent {
     pub fn lines(&self) -> FileLinesContent {
         match self {
             FileContent::Content(file) => match file.content.to_string() {
-                Some(string) => {
+                Ok(string) => {
                     let mut bytes_offset = 0;
                     FileLinesContent::Lines(
                         string
@@ -1412,7 +1425,7 @@ impl FileContent {
                             .collect(),
                     )
                 }
-                None => FileLinesContent::Unparseable,
+                Err(_) => FileLinesContent::Unparseable,
             },
             FileContent::NotFound => FileLinesContent::NotFound,
         }

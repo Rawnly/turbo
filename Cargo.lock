@@ -5113,6 +5113,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bitflags",
+ "bytes",
  "concurrent-queue",
  "futures",
  "futures-retry",

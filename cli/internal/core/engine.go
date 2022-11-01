@@ -46,8 +46,8 @@ func NewEngine(topologicalGraph *dag.AcyclicGraph) *Engine {
 	}
 }
 
-// EngineExecutionOptions are options for a single engine execution
-type EngineExecutionOptions struct {
+// EngineBuildingOpts are passed in to build the TaskGraph
+type EngineBuildingOpts struct {
 	// Packages in the execution scope, if nil, all packages will be considered in scope
 	Packages []string
 	// TaskNames in the execution scope, if nil, all tasks will be executed
@@ -57,7 +57,7 @@ type EngineExecutionOptions struct {
 }
 
 // Prepare constructs the Task Graph for a list of packages and tasks
-func (e *Engine) Prepare(options *EngineExecutionOptions) error {
+func (e *Engine) Prepare(options *EngineBuildingOpts) error {
 	pkgs := options.Packages
 	tasks := options.TaskNames
 	if len(tasks) == 0 {
@@ -75,8 +75,8 @@ func (e *Engine) Prepare(options *EngineExecutionOptions) error {
 	return nil
 }
 
-// ExecOpts controls a single walk of the task graph
-type ExecOpts struct {
+// EngineExecutionOpts controls a single walk of the task graph
+type EngineExecutionOpts struct {
 	// Parallel is whether to run tasks in parallel
 	Parallel bool
 	// Concurrency is the number of concurrent tasks that can be executed
@@ -84,7 +84,7 @@ type ExecOpts struct {
 }
 
 // Execute executes the pipeline, constructing an internal task graph and walking it accordingly.
-func (e *Engine) Execute(visitor Visitor, opts ExecOpts) []error {
+func (e *Engine) Execute(visitor Visitor, opts EngineExecutionOpts) []error {
 	var sema = util.NewSemaphore(opts.Concurrency)
 	return e.TaskGraph.Walk(func(v dag.Vertex) error {
 		// Always return if it is the root node
@@ -198,14 +198,12 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 		if hasTopoDeps {
 			depPkgs := e.TopologicGraph.DownEdges(pkg)
 			for _, from := range task.TopoDeps.UnsafeListOfStrings() {
-				// add task dep from all the package deps within repo
 				for depPkg := range depPkgs {
 					fromTaskID, err := e.addTaskToGraph(taskID, from, depPkg.(string))
 					if err != nil {
 						return err
 					}
 					traversalQueue = append(traversalQueue, fromTaskID)
-
 				}
 			}
 		}

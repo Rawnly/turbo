@@ -100,7 +100,7 @@ func (e *Engine) Execute(visitor Visitor, opts ExecOpts) []error {
 	})
 }
 
-func (e *Engine) GetTaskDefinition(pkg string, taskName string, taskID string) (*Task, error) {
+func (e *Engine) getTaskDefinition(pkg string, taskName string, taskID string) (*Task, error) {
 	if task, ok := e.Tasks[taskID]; ok {
 		return task, nil
 	}
@@ -125,7 +125,7 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 		for _, taskName := range taskNames {
 			if !isRootPkg || e.rootEnabledTasks.Includes(taskName) {
 				taskID := util.GetTaskId(pkg, taskName)
-				if _, err := e.GetTaskDefinition(pkg, taskName, taskID); err != nil {
+				if _, err := e.getTaskDefinition(pkg, taskName, taskID); err != nil {
 					// Initial, non-package tasks are not required to exist, as long as some
 					// package in the list packages defines it as a package-task. Dependencies
 					// *are* required to have a definition.
@@ -150,84 +150,108 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 			return fmt.Errorf("%v needs an entry in turbo.json before it can be depended on because it is a task run from the root package", taskID)
 		}
 
-		task, err := e.GetTaskDefinition(pkg, taskName, taskID)
+		task, err := e.getTaskDefinition(pkg, taskName, taskID)
 
 		if err != nil {
 			return err
 		}
 
-		if !visited.Includes(taskID) {
-			visited.Add(taskID)
+		// Exit loop if we've already seen this taskID.
+		if visited.Includes(taskID) {
+			continue
+		}
 
-			deps := task.Deps
+		visited.Add(taskID)
 
-			if tasksOnly {
-				deps = deps.Filter(func(d interface{}) bool {
-					for _, target := range taskNames {
-						return fmt.Sprintf("%v", d) == target
+		deps := task.Deps
+
+		if tasksOnly {
+			deps = deps.Filter(func(d interface{}) bool {
+				for _, target := range taskNames {
+					return fmt.Sprintf("%v", d) == target
+				}
+				return false
+			})
+			task.TopoDeps = task.TopoDeps.Filter(func(d interface{}) bool {
+				for _, target := range taskNames {
+					return fmt.Sprintf("%v", d) == target
+				}
+				return false
+			})
+		}
+
+		hasTopoDeps := task.TopoDeps.Len() > 0 && e.TopologicGraph.DownEdges(pkg).Len() > 0
+		hasDeps := deps.Len() > 0
+
+		hasPackageTaskDeps := false
+		if _, ok := packageTasksDepsMap[taskID]; ok {
+			hasPackageTaskDeps = true
+		}
+
+		if hasTopoDeps {
+			depPkgs := e.TopologicGraph.DownEdges(pkg)
+			for _, from := range task.TopoDeps.UnsafeListOfStrings() {
+				// add task dep from all the package deps within repo
+				for depPkg := range depPkgs {
+					fromTaskID, err := e.addToGraph(taskID, from, depPkg.(string))
+					if err != nil {
+						return err
 					}
-					return false
-				})
-				task.TopoDeps = task.TopoDeps.Filter(func(d interface{}) bool {
-					for _, target := range taskNames {
-						return fmt.Sprintf("%v", d) == target
-					}
-					return false
-				})
-			}
+					traversalQueue = append(traversalQueue, fromTaskID)
 
-			hasTopoDeps := task.TopoDeps.Len() > 0 && e.TopologicGraph.DownEdges(pkg).Len() > 0
-			hasDeps := deps.Len() > 0
-
-			hasPackageTaskDeps := false
-			if _, ok := packageTasksDepsMap[taskID]; ok {
-				hasPackageTaskDeps = true
-			}
-
-			if hasTopoDeps {
-				depPkgs := e.TopologicGraph.DownEdges(pkg)
-				for _, from := range task.TopoDeps.UnsafeListOfStrings() {
-					// add task dep from all the package deps within repo
-					for depPkg := range depPkgs {
-						fromTaskID := util.GetTaskId(depPkg, from)
-						e.TaskGraph.Add(fromTaskID)
-						e.TaskGraph.Add(taskID)
-						e.TaskGraph.Connect(dag.BasicEdge(taskID, fromTaskID))
-						traversalQueue = append(traversalQueue, fromTaskID)
-					}
 				}
 			}
+		}
 
-			if hasDeps {
-				for _, from := range deps.UnsafeListOfStrings() {
-					fromTaskID := util.GetTaskId(pkg, from)
-					e.TaskGraph.Add(fromTaskID)
-					e.TaskGraph.Add(taskID)
-					e.TaskGraph.Connect(dag.BasicEdge(taskID, fromTaskID))
+		if hasDeps {
+			for _, from := range deps.UnsafeListOfStrings() {
+				fromTaskID, err := e.addToGraph(taskID, from, pkg)
+				if err != nil {
+					return err
+				}
+				traversalQueue = append(traversalQueue, fromTaskID)
+			}
+		}
+
+		if hasPackageTaskDeps {
+			if pkgTaskDeps, ok := packageTasksDepsMap[taskID]; ok {
+				for _, fromTaskID := range pkgTaskDeps {
+					fromTaskID, err := e.addToGraph(taskID, fromTaskID, "")
+					if err != nil {
+						return err
+					}
 					traversalQueue = append(traversalQueue, fromTaskID)
 				}
 			}
-
-			if hasPackageTaskDeps {
-				if pkgTaskDeps, ok := packageTasksDepsMap[taskID]; ok {
-					for _, fromTaskID := range pkgTaskDeps {
-						e.TaskGraph.Add(fromTaskID)
-						e.TaskGraph.Add(taskID)
-						e.TaskGraph.Connect(dag.BasicEdge(taskID, fromTaskID))
-						traversalQueue = append(traversalQueue, fromTaskID)
-					}
-				}
-			}
-
-			if !hasDeps && !hasTopoDeps && !hasPackageTaskDeps {
-				e.TaskGraph.Add(ROOT_NODE_NAME)
-				e.TaskGraph.Add(taskID)
-				e.TaskGraph.Connect(dag.BasicEdge(taskID, ROOT_NODE_NAME))
-			}
 		}
+
+		if !hasDeps && !hasTopoDeps && !hasPackageTaskDeps {
+			e.TaskGraph.Add(ROOT_NODE_NAME)
+			e.TaskGraph.Add(taskID)
+			e.TaskGraph.Connect(dag.BasicEdge(taskID, ROOT_NODE_NAME))
+		}
+
 	}
 
 	return nil
+}
+
+func (e *Engine) addToGraph(taskID string, from string, pkgName string) (string, error) {
+	fromTaskID := util.GetTaskId(pkgName, from)
+	fromTask, err := e.getTaskDefinition(pkgName, from, fromTaskID)
+
+	if err != nil {
+		return "", fmt.Errorf("Could not find taskID \"%s\" in graph. This is likely a bug, please file an issue at https://github.com/vercel/turbo/issues/new", taskID)
+	}
+
+	if fromTask.Persistent {
+		return "", fmt.Errorf("Persistent tasks cannot depend on other persistent tasks. Found %#v depends on %#v", taskID, fromTaskID)
+	}
+
+	e.TaskGraph.Add(fromTaskID)
+	e.TaskGraph.Add(taskID)
+	e.TaskGraph.Connect(dag.BasicEdge(taskID, fromTaskID))
+	return fromTaskID, nil
 }
 
 func getPackageTaskDepsMap(packageTaskDeps [][]string) map[string][]string {

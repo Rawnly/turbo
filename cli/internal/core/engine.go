@@ -119,7 +119,6 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 	packageTasksDepsMap := getPackageTaskDepsMap(e.PackageTaskDeps)
 
 	traversalQueue := []string{}
-
 	for _, pkg := range pkgs {
 		isRootPkg := pkg == util.RootPkgName
 		for _, taskName := range taskNames {
@@ -131,7 +130,6 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 					// *are* required to have a definition.
 					continue
 				}
-
 				traversalQueue = append(traversalQueue, taskID)
 			}
 		}
@@ -193,7 +191,7 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 			for _, from := range task.TopoDeps.UnsafeListOfStrings() {
 				// add task dep from all the package deps within repo
 				for depPkg := range depPkgs {
-					fromTaskID, err := e.addToGraph(taskID, from, depPkg.(string))
+					fromTaskID, err := e.addTaskToGraph(taskID, from, depPkg.(string))
 					if err != nil {
 						return err
 					}
@@ -205,7 +203,7 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 
 		if hasDeps {
 			for _, from := range deps.UnsafeListOfStrings() {
-				fromTaskID, err := e.addToGraph(taskID, from, pkg)
+				fromTaskID, err := e.addTaskToGraph(taskID, from, pkg)
 				if err != nil {
 					return err
 				}
@@ -216,7 +214,8 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 		if hasPackageTaskDeps {
 			if pkgTaskDeps, ok := packageTasksDepsMap[taskID]; ok {
 				for _, fromTaskID := range pkgTaskDeps {
-					fromTaskID, err := e.addToGraph(taskID, fromTaskID, "")
+					// TODO: Is this right?
+					fromTaskID, err := e.addTaskToGraph(taskID, fromTaskID, "")
 					if err != nil {
 						return err
 					}
@@ -236,7 +235,7 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 	return nil
 }
 
-func (e *Engine) addToGraph(taskID string, from string, pkgName string) (string, error) {
+func (e *Engine) addTaskToGraph(taskID string, from string, pkgName string) (string, error) {
 	fromTaskID := util.GetTaskId(pkgName, from)
 	fromTask, err := e.getTaskDefinition(pkgName, from, fromTaskID)
 

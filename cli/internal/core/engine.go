@@ -249,7 +249,7 @@ func (e *Engine) addTaskToGraph(taskID string, from string, pkgName string) (str
 	fromTask, err := e.getTaskDefinition(pkgName, from, fromTaskID)
 
 	if err != nil {
-		return "", fmt.Errorf("Could not find taskID \"%s\" in graph. This is likely a bug, please file an issue at https://github.com/vercel/turbo/issues/new", taskID)
+		return "", fmt.Errorf("Could not find taskID \"%s\" in graph. This is likely a bug, please file an issue at %s", taskID, util.SourceCodeIssues)
 	}
 
 	if fromTask.Persistent {

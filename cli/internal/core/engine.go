@@ -112,6 +112,7 @@ func (e *Engine) getTaskDefinition(pkg string, taskName string, taskID string) (
 }
 
 func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly bool) error {
+	// TODO: why would this ever be nil?
 	if e.PackageTaskDeps == nil {
 		e.PackageTaskDeps = [][]string{}
 	}
@@ -186,8 +187,9 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 		// E.g. `build: { dependsOn: [dev]}`
 		hasDeps := deps.Len() > 0
 
-		// hasPackageTaskDeps will be true if the task depends on any workspace-specifiv tasks
-		// E.g. `build: { dependsOn: [my-package#beforebuild]}`
+		// hasPackageTaskDeps will be true if this is a workspace-specific task, and
+		// it depends on another workspace-specifiv tasks
+		// E.g. `my-package#build: { dependsOn: [my-package#beforebuild]}`.
 		hasPackageTaskDeps := false
 		if _, ok := packageTasksDepsMap[taskID]; ok {
 			hasPackageTaskDeps = true

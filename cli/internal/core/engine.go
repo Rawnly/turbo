@@ -178,9 +178,16 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 			})
 		}
 
+		// hasTopoDeps will be true if the task depends on any tasks from dependency packages
+		// E.g. `dev: { dependsOn: [^dev]}`
 		hasTopoDeps := task.TopoDeps.Len() > 0 && e.TopologicGraph.DownEdges(pkg).Len() > 0
+
+		// hasDeps will be true if the task depends on any tasks from its own package
+		// E.g. `build: { dependsOn: [dev]}`
 		hasDeps := deps.Len() > 0
 
+		// hasPackageTaskDeps will be true if the task depends on any workspace-specifiv tasks
+		// E.g. `build: { dependsOn: [my-package#beforebuild]}`
 		hasPackageTaskDeps := false
 		if _, ok := packageTasksDepsMap[taskID]; ok {
 			hasPackageTaskDeps = true
@@ -224,6 +231,7 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 			}
 		}
 
+		// Add the root node into the graph
 		if !hasDeps && !hasTopoDeps && !hasPackageTaskDeps {
 			e.TaskGraph.Add(ROOT_NODE_NAME)
 			e.TaskGraph.Add(taskID)
@@ -235,6 +243,7 @@ func (e *Engine) generateTaskGraph(pkgs []string, taskNames []string, tasksOnly 
 	return nil
 }
 
+// addTaskToGraph adds an edge between two tasks, but validates the relationship is valid first.
 func (e *Engine) addTaskToGraph(taskID string, from string, pkgName string) (string, error) {
 	fromTaskID := util.GetTaskId(pkgName, from)
 	fromTask, err := e.getTaskDefinition(pkgName, from, fromTaskID)

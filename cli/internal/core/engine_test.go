@@ -167,6 +167,26 @@ libD#build
 	}
 }
 
+func TestPrepare_PersistentTopologicalDependencies(t *testing.T) {
+	// "dev": dependsOn: ["^dev"] (where dev is persistent)
+}
+
+func TestPrepare_PersistentSameWorkspaceDependencies(t *testing.T) {
+	// "build": dependsOn: ["dev"] (where build is not, but dev is persistent)
+}
+
+func TestPrepare_PersistentDependentWorkspaceDependencies(t *testing.T) {
+	// "dev": dependsOn: ["ui#dev"] (where dev and ui#dev are persistent)
+}
+
+func TestPrepare_PersistentCrossWorkspaceDependencies(t *testing.T) {
+	// "ui#dev": dependsOn: ["design#dev"] (where ui#dev and other#dev are persistent)
+}
+
+func TestPrepare_PersistentButUnimplementedDependency(t *testing.T) {
+	// "dev": dependsOn: ["^dev"] (dev is not implemented in any dependencies)
+}
+
 func TestRunPackageTask(t *testing.T) {
 	graph := &dag.AcyclicGraph{}
 	graph.Add("app1")
